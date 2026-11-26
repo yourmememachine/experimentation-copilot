@@ -1,0 +1,25 @@
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f6f7f9;color:#17202a}
+header{background:#111827;color:#fff;padding:28px 20px}header h1{margin:0 0 6px;font-size:26px}
+.sub{color:#cbd5e1;max-width:760px}.health{color:#93c5fd;font-size:14px}
+main{max-width:900px;margin:20px auto;padding:0 16px;display:grid;gap:16px}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card .sub{color:#475569}
+textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}
+.examples{margin:10px 0;font-size:14px;color:#475569}
+button{font:inherit;cursor:pointer;border-radius:8px;padding:9px 16px;border:1px solid #cbd5e1;background:#fff}
+button.primary{background:#2563eb;color:#fff;border-color:#2563eb}button.primary:disabled{background:#94a3b8;cursor:not-allowed}
+button.ex{padding:4px 10px;margin-left:6px;font-size:13px}button.ghost{background:#f1f5f9}
+.row{display:flex;gap:10px;margin-top:12px}.hidden{display:none}.error{color:#b91c1c}
+.splitbar{display:flex;height:18px;border-radius:6px;overflow:hidden;margin:8px 0 4px}.splitbar span{display:block}
+.splitlabels{font-size:13px;color:#475569;margin:0 0 8px}
+.pass{color:#047857}.warn{color:#b45309}.block{color:#b91c1c}
+.approve{display:block;margin:14px 0;background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:8px}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid #e2e8f0}
+.staleitem{border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px 14px;margin-top:10px}
+code{background:#f1f5f9;padding:1px 5px;border-radius:4px}
+footer{max-width:900px;margin:0 auto 30px;padding:0 16px;color:#64748b;font-size:13px}
+.rollout{font-size:14px;color:#334155;margin:2px 0}
+.nextsteps a{color:#2563eb}
+input[type=text],input[type=number]{font:inherit;padding:9px 10px;border:1px solid #cbd5e1;border-radius:8px}
+button:disabled{opacity:.6;cursor:not-allowed}
+.archiveBtn{margin-top:6px}

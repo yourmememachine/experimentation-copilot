@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+.pytest_cache/
+demo/frames/
+demo/profile-rec/
+SUBMIT-CHANNEL-CHECK-2026-11-25.md
+docs/REVIEW-GATE.md
+docs/
+demo/record.js

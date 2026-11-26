@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Experimentation Copilot</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<header><h1>Experimentation Copilot</h1>
+<p class="sub">Describe the experiment you want to run. I draft the flag, check it against guardrails, and — only with your approval — set it up in Flagsmith.</p>
+<p id="health" class="health">Checking connection…</p></header>
+
+<main>
+<section class="card">
+  <h2>1. Describe your experiment</h2>
+  <textarea id="prompt" rows="3" placeholder="e.g. Test a new checkout button colour green vs blue for 20% of users, success is checkout_completed"></textarea>
+  <div class="examples"><span>Try:</span>
+    <button class="ex" data-p="Test a new checkout button colour green vs blue for 20% of users, success is checkout_completed">Checkout button colour</button>
+    <button class="ex" data-p="Test a new one-page checkout against the current checkout to improve checkout completion">One-page checkout</button>
+    <button class="ex" data-p="Show a shorter sign-up form to new visitors to improve sign-up rate">Shorter sign-up form</button>
+  </div>
+  <button id="planBtn" class="primary">Draft experiment plan</button>
+  <p id="planError" class="error"></p>
+</section>
+
+<section class="card hidden" id="planCard">
+  <h2>2. Review the plan</h2>
+  <div id="planBody"></div>
+  <h3>Guardrails</h3>
+  <div id="guardrails"></div>
+  <label class="approve"><input type="checkbox" id="approveBox"> I have reviewed this plan, its hypothesis, and the guardrail results, and I approve applying it.</label>
+  <div class="row">
+    <button id="applyBtn" class="primary" disabled>Approve &amp; Apply</button>
+    <button id="rollbackBtn" class="ghost hidden">Roll back last apply</button>
+  </div>
+  <p id="applyResult"></p>
+</section>
+
+<section class="card" id="flagsSection">
+  <h2>Current flags</h2>
+  <button id="flagsBtn" class="ghost">Refresh flags</button>
+  <p id="flagsError" class="error"></p>
+  <table id="flagsTable"><thead><tr><th>Flag</th><th>Status</th><th>Type</th><th>Variants</th><th>Description</th></tr></thead><tbody></tbody></table>
+</section>
+
+<section class="card" id="resultsSection">
+  <h2>Experiment results</h2>
+  <p class="sub">Simulate traffic against a flag to see per-variant results, then roll out the winner when the results are conclusive.</p>
+  <div class="row">
+    <input id="simFlag" type="text" placeholder="Flag name, e.g. checkout_button_colour">
+    <input id="simVisitors" type="number" value="1000" min="1" max="20000">
+    <button id="simBtn" class="primary">Simulate traffic</button>
+  </div>
+  <p id="simError" class="error"></p>
+  <div id="resultsBody"></div>
+  <div class="row">
+    <button id="graduateBtn" class="primary hidden">Approve &amp; roll out winner</button>
+    <button id="gradRollbackBtn" class="ghost hidden">Roll back rollout</button>
+  </div>
+  <p id="graduateResult"></p>
+</section>
+
+<section class="card" id="staleSection">
+  <h2>Stale-flag cleanup</h2>
+  <p class="sub">Flags that have not changed or been evaluated in a long time add risk and clutter. Here is what I recommend cleaning up, and why.</p>
+  <button id="staleBtn" class="ghost">Run stale check</button>
+  <p id="staleError" class="error"></p>
+  <div id="staleBody"></div>
+</section>
+</main>
+<footer>Experimentation Copilot — experiments are created in Flagsmith only after your explicit approval, and every apply keeps a snapshot you can roll back.</footer>
+<script src="/static/app.js"></script>
+</body></html>
