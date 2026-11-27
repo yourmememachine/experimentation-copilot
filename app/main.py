@@ -18,7 +18,7 @@ stored copy is integrity-checked against the hash taken at plan time.
 Every mutating call snapshots the previous state first; a snapshot is
 only handed out after the change it protects has actually succeeded.
 """
-import hashlib, json, os, random, re, time, uuid
+import hashlib, json, math, os, random, re, time, uuid
 from copy import deepcopy
 from pathlib import Path
 
@@ -492,6 +492,13 @@ def h_rollback(body):
                                       is_archived=bool(before.get("is_archived", False)),
                                       default_enabled=bool(before.get("default_enabled", False)))
                 client.set_flag_state(fid, bool(before.get("enabled", False)))
+                # A graduate rollback must also restore the variant
+                # split — restoring only the on/off state would leave
+                # the winner at 100% and silently keep the rollout.
+                before_variants = _variants_of(before)
+                if len(before_variants) >= 2 and hasattr(client, "set_variant_allocations"):
+                    client.set_variant_allocations(
+                        name, {v["name"]: v["allocation"] for v in before_variants})
         except Exception as exc:
             return 502, {"error": f"Flagsmith rejected the rollback: {exc}"}
         after = _find_flag(name)
@@ -501,6 +508,10 @@ def h_rollback(body):
             verified = (after is not None
                         and bool(after.get("enabled")) == bool(before.get("enabled"))
                         and bool(after.get("is_archived", False)) == bool(before.get("is_archived", False)))
+            if verified and len(_variants_of(before)) >= 2:
+                alloc_before = {v["name"]: v["allocation"] for v in _variants_of(before)}
+                alloc_after = {v["name"]: v["allocation"] for v in _variants_of(after)}
+                verified = alloc_after == alloc_before
         if not verified:
             return 502, {"error": "rollback could not be verified — snapshot kept"}
     else:
@@ -519,7 +530,11 @@ def _variants_of(flag):
     for o in opts:
         if isinstance(o, dict):
             alloc = o.get("default_percentage_allocation")
-            variants.append({"name": str(o.get("value", o.get("name", "variant"))),
+            # Demo-store options carry "value"; live Flagsmith options
+            # carry "string_value". Either names the variant.
+            name = next((o[k] for k in ("value", "string_value", "name")
+                         if o.get(k) is not None), "variant")
+            variants.append({"name": str(name),
                              "allocation": float(alloc) if alloc is not None else 0.0})
     if variants:
         return variants
@@ -532,13 +547,55 @@ def _variants_of(flag):
         return variants
     return [{"name": "enabled", "allocation": 100.0}]
 
-def _variant_rate(flag_name, variant_name):
-    if "control" in variant_name.lower():
+def _variant_rate(flag_name, variant_name, is_control=False):
+    """Deterministic simulated true conversion rate for a variant.
+
+    The control variant converts at the 10% baseline. Every other
+    variant gets a deterministic lift of 0–5.9 points derived from a
+    hash of (flag, variant), so simulated experiments exhibit real,
+    reproducible effects instead of noise-level gaps.
+    """
+    if is_control or "control" in variant_name.lower():
         return 0.10
     digest = int(hashlib.sha256(f"{flag_name}:{variant_name}".encode()).hexdigest()[:6], 16)
-    return 0.10 + (digest % 40) / 1000.0
+    return 0.10 + (digest % 60) / 1000.0
+
+def _two_proportion_p_value(x1, n1, x2, n2):
+    """Two-sided p-value for the difference of two proportions.
+
+    Pooled two-proportion z-test; the normal CDF is computed via
+    math.erfc so no third-party statistics package is needed.
+    """
+    if n1 <= 0 or n2 <= 0:
+        return 1.0
+    pooled = (x1 + x2) / (n1 + n2)
+    se = math.sqrt(pooled * (1 - pooled) * (1 / n1 + 1 / n2))
+    if se == 0:
+        return 1.0
+    z = abs(x1 / n1 - x2 / n2) / se
+    return math.erfc(z / math.sqrt(2))
 
 def h_simulate(body):
+    """Run the what-if simulation and apply the winner rule.
+
+    The decision rule is fixed in advance and does not depend on the
+    outcome of any particular run:
+
+    * Primary metric: the per-variant conversion rate of the flag's
+      success metric over the simulated exposures.
+    * A winner is recommended only when BOTH hold: at least
+      ``_MIN_TOTAL_CONVERSIONS`` conversions in total (the sample-size
+      floor), and the leader beats the runner-up on a two-proportion
+      z-test at ``_SIGNIFICANCE_ALPHA`` (p < 0.05).
+    * Otherwise the verdict is "inconclusive", with the reason recorded
+      (``insufficient_conversions`` or ``not_significant``) — the
+      stopping rule is "keep collecting data", never "pick the current
+      leader anyway".
+    * Variant conversion rates are deterministic per flag + variant
+      (see ``_variant_rate``), so every run of the same scenario
+      reproduces exactly; the effect a variant carries is fixed by its
+      name hash before any run, not tuned afterwards.
+    """
     body = body or {}
     name = body.get("flag_name")
     if not isinstance(name, str) or not name.strip():
@@ -563,7 +620,9 @@ def h_simulate(body):
         else:
             exposures = int(visitors * v["allocation"] / total_alloc)
             assigned += exposures
-        rate_true = _variant_rate(name, v["name"])
+        # The first variant is the control (creation order from the
+        # plan); it converts at the baseline rate.
+        rate_true = _variant_rate(name, v["name"], is_control=(i == 0))
         seed = int(hashlib.sha256(f"sim:{name}:{v['name']}".encode()).hexdigest()[:8], 16)
         rng = random.Random(seed)
         conversions = sum(1 for _ in range(exposures) if rng.random() < rate_true)
@@ -571,13 +630,40 @@ def h_simulate(body):
                      "conversions": conversions,
                      "rate": round(conversions / exposures, 4) if exposures else 0.0})
     total_conversions = sum(r["conversions"] for r in rows)
-    if total_conversions < 30 or not rows:
-        winner = "inconclusive"
-    else:
-        winner = max(rows, key=lambda r: r["rate"])["name"]
+    # A winner is recommended only when the leader's edge over the
+    # runner-up is statistically significant (two-proportion z-test,
+    # alpha 0.05). A raw-volume lead that could be noise is reported
+    # as inconclusive instead.
+    winner = "inconclusive"
+    p_value = None
+    significant = False
+    compared_against = None
+    leader = max(rows, key=lambda r: r["rate"])["name"] if rows else None
+    verdict_reason = "insufficient_conversions"
+    if rows and total_conversions >= 30:
+        if len(rows) == 1:
+            winner = rows[0]["name"]
+            verdict_reason = "single_variant"
+        else:
+            ranked = sorted(rows, key=lambda r: r["rate"], reverse=True)
+            best, runner_up = ranked[0], ranked[1]
+            compared_against = runner_up["name"]
+            p_value = _two_proportion_p_value(
+                best["conversions"], best["exposures"],
+                runner_up["conversions"], runner_up["exposures"])
+            if p_value < 0.05:
+                winner = best["name"]
+                significant = True
+                verdict_reason = "significant"
+            else:
+                verdict_reason = "not_significant"
     result = {"flag_name": name, "visitors": visitors, "variants": rows,
               "total_conversions": total_conversions,
-              "recommended_winner": winner, "winner": winner}
+              "recommended_winner": winner, "winner": winner,
+              "leader": leader, "compared_against": compared_against,
+              "p_value": round(p_value, 4) if p_value is not None else None,
+              "significant": significant, "alpha": 0.05,
+              "verdict_reason": verdict_reason}
     _results[name] = result
     return 200, result
 
@@ -631,6 +717,17 @@ def h_archive(body):
     flag = _find_flag(name)
     if flag is None:
         return 404, {"error": f"flag not found: {name}"}
+    # Safe archival: only a flag the stale check scores as safe to remove
+    # may be archived. An active flag ("keep") or a decided experiment
+    # whose winner still has to be rolled out ("rollout_winner") is
+    # refused even with approval, so this endpoint can never be used to
+    # archive a live or protected flag by mistake.
+    report = {item.get("flag"): item for item in stale_analysis()}
+    item = report.get(name)
+    if item is None or not item.get("safe_to_remove"):
+        action = (item or {}).get("recommended_action", "not evaluated")
+        return 400, {"error": f"refused: the stale check does not mark {name} safe to remove "
+                              f"(recommended action: {action})"}
     client = get_client_cached()
     if client is not None:
         try:

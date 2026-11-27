@@ -4,7 +4,7 @@ Turn a plain-English request into a guarded Flagsmith experiment — and keep yo
 
 I built this for Toggle Wars Track 02 (AI Agents and Feature Flags). I kept running into the same two problems with feature flags: setting up a proper experiment takes a dozen careful steps in a dashboard, and old flags pile up until nobody knows what is safe to remove. Experimentation Copilot handles both ends of that lifecycle.
 
-**Demo video:** _link added once the final recording is uploaded_
+**Demo video:** __DEMO_VIDEO_URL__
 **Track:** 02 — AI Agents and Feature Flags
 
 ## What it does
@@ -49,6 +49,16 @@ Flagsmith is the core of the project, not a storage layer:
 
 Metric: `checkout_completed` events. Traffic: 20% of users, split 50/50 between control (green) and variant (blue), ramping 5% → 20% → 50% → 100% only while the guardrails pass.
 
+### Decision rule (fixed in advance)
+
+The simulation's winner rule is predetermined — it is defined here and in `app/main.py` (`h_simulate`), and it does not change from run to run:
+
+- **Primary metric:** the per-variant conversion rate of the experiment's success metric.
+- **Significance threshold:** a two-proportion z-test of the leader against the runner-up must reach **p < 0.05** (alpha = 0.05).
+- **Sample-size floor:** at least **30 conversions in total** before any winner can be recommended, however large the gap looks.
+- **Stopping rule:** if either condition fails, the verdict is **Inconclusive** (with the reason recorded: `insufficient_conversions` or `not_significant`) and the correct action is to keep collecting data — the current leader is never promoted on a hunch.
+- **Reproducibility:** variant conversion rates are deterministic per flag + variant, derived from a hash of their names, so the same scenario always produces the same numbers and the p-value shown on the results card can be recomputed from the exposures and conversions displayed next to it. The demo shows both outcomes: a defensible winner (blue, p < 0.001 at 2,000 visitors) and a genuine Inconclusive (a 60-visitor run that clears neither bar).
+
 ## Flagsmith setup
 
 Option A — Flagsmith Cloud (free tier):
@@ -77,13 +87,26 @@ Open http://127.0.0.1:8077, type a prompt (or click an example), review the plan
 
 Without FastAPI installed, the app falls back to a standard-library server with the same routes: `python3 -m app.main`.
 
+## Reproducing the demo
+
+From a clean checkout:
+
+```bash
+pip install -r requirements.txt
+FLAGSMITH_DEMO_MODE=1 uvicorn app.main:app --port 8077
+```
+
+Demo mode needs no Flagsmith account and no credentials: the copilot runs against the built-in store (Option C above). Live mode (`FLAGSMITH_DEMO_MODE=0` with a token set) runs the identical flows against a real Flagsmith project — the demo video was recorded in live mode against a self-hosted Flagsmith, and the header of the app states which mode you are in ("Using sample flags" in demo mode, "Connected to Flagsmith (live)" in live mode).
+
+The recorded demo flow, in order: describe the checkout experiment → review the plan → watch a 95%-traffic plan and a no-metric plan get stopped by the guardrails → approve and apply the 20% plan → see the flag live in the Flagsmith dashboard → simulate 2,000 visitors (winner: blue, p < 0.001) → simulate 60 visitors (Inconclusive) → roll the winner out to 100% and verify the weights in Flagsmith → run the stale check → archive a stale flag → roll the apply back from its snapshot.
+
 ## Tests
 
 ```bash
 pytest tests/ -q
 ```
 
-45 tests cover the guardrail rules, the staleness scoring, and the planner's edge cases.
+69 tests: the guardrail rules, the staleness scoring, the planner's edge cases, the Flagsmith client's request shapes against the current API, the simulation's significance gate, and API-level safety tests proving that refused plans never mutate flag state, that rollback restores the pre-change state (including variant allocations), and that archiving only ever touches flags the stale check marks safe to remove.
 
 ## Disclosure
 

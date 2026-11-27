@@ -449,17 +449,49 @@ class FlagsmithClient:
         return resolved
 
     # -- reads ---------------------------------------------------------
+    @staticmethod
+    def _merge_environment_state(feature: Any) -> Any:
+        """Surface the environment's enabled state as ``enabled``.
+
+        Project feature payloads carry the per-environment state under
+        ``environment_feature_state`` (populated when the list/detail
+        request passes ``?environment=``). Callers expect a plain
+        ``enabled`` boolean, so merge it in when present.
+        """
+        if not isinstance(feature, dict):
+            return feature
+        state = feature.get("environment_feature_state")
+        if isinstance(state, dict):
+            merged = dict(feature)
+            merged["enabled"] = bool(state.get("enabled"))
+            if state.get("id") is not None:
+                merged["environment_feature_state_id"] = state["id"]
+            return merged
+        return feature
+
     def list_flags(self, project_id: int | None = None, environment_id: int | None = None) -> list[dict[str, Any]]:
         if self._store is not None:
             return self._store.list_flags(project_id=project_id, environment_id=environment_id)
-        result = self._request("GET", f"projects/{_q(self._project(project_id))}/features/")
-        return list(result) if isinstance(result, list) else [result]
+        env = environment_id or self.environment_id
+        path = f"projects/{_q(self._project(project_id))}/features/"
+        if env is not None:
+            path = f"{path}?environment={_q(env)}"
+        result = self._request("GET", path)
+        items = list(result) if isinstance(result, list) else [result]
+        if env is not None:
+            items = [self._merge_environment_state(item) for item in items]
+        return items
 
     def get_flag(self, flag_id: int | str) -> dict[str, Any]:
         if self._store is not None:
             return self._store.get_flag(flag_id)
         if isinstance(flag_id, int) or str(flag_id).isdigit():
-            return dict(self._request("GET", f"features/{_q(flag_id)}/"))
+            # Features are project-nested in the current API; the old
+            # flat /features/{id}/ route now serves the web UI, not JSON.
+            path = f"projects/{_q(self._project(None))}/features/{_q(flag_id)}/"
+            if self.environment_id is not None:
+                path = f"{path}?environment={_q(self.environment_id)}"
+            return dict(self._merge_environment_state(self._request("GET", path)))
         for flag in self.list_flags():
             if flag.get("name") == str(flag_id):
                 return flag
@@ -535,7 +567,53 @@ class FlagsmithClient:
             if "id" in opt:
                 entry["id"] = opt["id"]
             rebuilt.append(entry)
-        return self.update_feature(feature.get("id", flag_name_or_id), multivariate_options=rebuilt)
+        updated = self.update_feature(feature.get("id", flag_name_or_id), multivariate_options=rebuilt)
+        # The environment's own multivariate values are what SDKs in
+        # that environment actually serve, so roll the same weights
+        # into the environment feature state as well.
+        if self.environment_id is not None:
+            fid = feature.get("id", flag_name_or_id)
+            state = self._get_environment_state(fid, self.environment_id)
+            if state is not None and state.get("multivariate_feature_state_values"):
+                options_by_id = {
+                    opt.get("id"): opt for opt in existing if isinstance(opt, dict)
+                }
+                new_values = []
+                for mv in state["multivariate_feature_state_values"]:
+                    if not isinstance(mv, dict):
+                        continue
+                    opt = options_by_id.get(mv.get("multivariate_feature_option"))
+                    opt_value = None
+                    if isinstance(opt, dict):
+                        opt_value = opt.get("string_value", opt.get("value"))
+                    alloc = allocations.get(str(opt_value)) if opt_value is not None else None
+                    entry_mv = copy.deepcopy(mv)
+                    if alloc is not None:
+                        entry_mv["percentage_allocation"] = alloc
+                    new_values.append(entry_mv)
+                payload = copy.deepcopy(state)
+                payload["multivariate_feature_state_values"] = new_values
+                payload["live_from"] = _iso(_utcnow())
+                self._request("PUT", f"features/featurestates/{_q(state['id'])}/", payload)
+        return updated
+
+    def _get_environment_state(self, feature_id: int | str, environment_id: int) -> dict[str, Any] | None:
+        """Fetch the feature's state object in one environment, or None.
+
+        The collection route is filterable by feature+environment; the
+        detail route is write-only in the current API (GET returns 405),
+        and the environment-nested list route is permission-gated, so
+        this filtered list is the reliable read path.
+        """
+        states = self._request(
+            "GET",
+            f"features/featurestates/?feature={_q(feature_id)}&environment={_q(environment_id)}",
+        )
+        if isinstance(states, list):
+            for state in states:
+                if isinstance(state, dict) and state.get("feature_segment") is None and state.get("identity") is None:
+                    return state
+        return None
 
     def set_flag_state(self, feature_id: int | str, enabled: bool, environment_id: int | None = None, value: Any = None) -> dict[str, Any]:
         if self._store is not None:
@@ -545,19 +623,25 @@ class FlagsmithClient:
             raise FlagsmithError("environment_id is required (or set FLAGSMITH_ENVIRONMENT_ID)")
         feature = self.get_flag(feature_id)
         fid = feature.get("id", feature_id)
-        existing_states = self._request("GET", f"environments/{_q(env)}/featurestates/")
-        existing = None
-        if isinstance(existing_states, list):
-            for state in existing_states:
-                if isinstance(state, dict) and str(state.get("feature")) == str(fid):
-                    existing = state
-                    break
-        payload: dict[str, Any] = {"feature": fid, "environment": env, "enabled": bool(enabled), "live_from": _iso(_utcnow())}
-        if value is not None:
-            payload["feature_state_value"] = _typed_feature_state_value(value)
+        existing = self._get_environment_state(fid, env)
         if existing is not None and existing.get("id") is not None:
-            return dict(self._request("PUT", f"environments/{_q(env)}/featurestates/{_q(existing['id'])}/", payload))
-        return dict(self._request("POST", f"environments/{_q(env)}/featurestates/", payload))
+            # Full-object PUT: the current API rejects partial payloads
+            # on feature states (a PATCH 500s), so send the fetched
+            # state back with only the intended fields changed. The
+            # multivariate values ride along untouched.
+            payload = copy.deepcopy(existing)
+            payload["enabled"] = bool(enabled)
+            payload["live_from"] = _iso(_utcnow())
+            if value is not None:
+                payload["feature_state_value"] = _typed_feature_state_value(value)
+            return dict(self._request("PUT", f"features/featurestates/{_q(existing['id'])}/", payload))
+        payload: dict[str, Any] = {"feature": fid, "environment": env, "enabled": bool(enabled), "live_from": _iso(_utcnow())}
+        payload["feature_state_value"] = (
+            _typed_feature_state_value(value)
+            if value is not None
+            else {"type": "unicode", "string_value": None, "integer_value": None, "boolean_value": None}
+        )
+        return dict(self._request("POST", "features/featurestates/", payload))
 
     def update_feature(self, flag_id: int | str, **changes: Any) -> dict[str, Any]:
         if self._store is not None:
@@ -573,7 +657,10 @@ class FlagsmithClient:
                 payload[key] = feature[key]
         if "multivariate_options" in changes:
             payload["multivariate_options"] = changes["multivariate_options"]
-        return dict(self._request("PUT", f"features/{_q(fid)}/", payload))
+        # Feature writes are project-nested in the current API; the old
+        # flat /features/{id}/ route serves the web UI, not JSON.
+        project_id = feature.get("project") if isinstance(feature, dict) else None
+        return dict(self._request("PUT", f"projects/{_q(self._project(project_id))}/features/{_q(fid)}/", payload))
 
     def archive_flag(self, flag_id: int | str) -> dict[str, Any]:
         return self.update_feature(flag_id, is_archived=True)

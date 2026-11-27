@@ -142,16 +142,35 @@ async function loadFlags() {
 }
 $("#flagsBtn").onclick = loadFlags;
 
+function fmtP(p) {
+  if (p == null || !Number.isFinite(Number(p))) return null;
+  const n = Number(p);
+  return n < 0.001 ? "< 0.001" : n.toFixed(3);
+}
+
 function renderResults(d) {
   lastWinnerFlag = d.flag_name;
   lastWinner = (d.recommended_winner && d.recommended_winner !== "inconclusive") ? d.recommended_winner : null;
   const rows = (d.variants || []).map(v =>
     `<tr><td><code>${escapeHtml(v.name)}</code></td><td>${escapeHtml(v.exposures)}</td><td>${escapeHtml(v.conversions)}</td><td>${escapeHtml(v.rate)}</td></tr>`).join("");
+  let verdict;
+  if (lastWinner) {
+    const p = fmtP(d.p_value);
+    const pPhrase = p ? (p.startsWith("<") ? `p ${p}` : `p = ${p}`) : null;
+    verdict = `<p class="pass">Recommended winner: <strong>${escapeHtml(lastWinner)}</strong> (${escapeHtml(d.total_conversions)} conversions in total).` +
+      (pPhrase && d.compared_against
+        ? ` Two-proportion z-test vs <strong>${escapeHtml(d.compared_against)}</strong>: ${pPhrase} — significant at the 5% level.`
+        : "") + `</p>`;
+  } else if (d.verdict_reason === "not_significant" && fmtP(d.p_value)) {
+    const p = fmtP(d.p_value);
+    const pPhrase = p.startsWith("<") ? `p ${p}` : `p = ${p}`;
+    verdict = `<p class="warn">Result so far: inconclusive — <strong>${escapeHtml(d.leader || "the leader")}</strong> leads, but the gap vs <strong>${escapeHtml(d.compared_against || "the runner-up")}</strong> is not statistically significant (${pPhrase}, z-test). No winner is recommended yet.</p>`;
+  } else {
+    verdict = `<p class="warn">Result so far: inconclusive — fewer than 30 conversions in total, so no winner is recommended yet.</p>`;
+  }
   $("#resultsBody").innerHTML =
     `<table><thead><tr><th>Variant</th><th>Exposures</th><th>Conversions</th><th>Rate</th></tr></thead><tbody>${rows}</tbody></table>` +
-    (lastWinner
-      ? `<p class="pass">Recommended winner: <strong>${escapeHtml(lastWinner)}</strong> (${escapeHtml(d.total_conversions)} conversions in total).</p>`
-      : `<p class="warn">Result so far: inconclusive — fewer than 30 conversions in total, so no winner is recommended yet.</p>`);
+    verdict;
   $("#graduateBtn").classList.toggle("hidden", !lastWinner);
   $("#gradRollbackBtn").classList.add("hidden");
   $("#graduateResult").textContent = "";
