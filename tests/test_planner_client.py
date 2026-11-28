@@ -178,7 +178,7 @@ def test_full_rollout_without_since_field_only_scores_partial():
     (entry,) = analyse_flags(flags, now=NOW)
     assert entry["recommended_action"] == "keep"
     assert entry["score"] == 15
-    assert any("verify" in reason for reason in entry["reasons"])
+    assert any("is unverified" in reason for reason in entry["reasons"])
 
 
 def test_full_rollout_with_explicit_since_gets_full_bonus():
@@ -221,7 +221,7 @@ def test_disabled_without_since_field_only_scores_partial():
     assert entry["recommended_action"] == "keep"
     assert entry["safe_to_remove"] is False
     assert entry["score"] == 15
-    assert any("verify" in reason for reason in entry["reasons"])
+    assert any("is unverified" in reason for reason in entry["reasons"])
 
 
 def test_disabled_with_day_count_gets_full_bonus():

@@ -285,3 +285,38 @@ def test_never_evaluated_old_flag_is_stale():
     (entry,) = analyse_flags(flags, now=NOW)
     assert entry["recommended_action"] == "archive"
     assert entry["score"] <= 100
+
+
+def test_flag_without_evaluation_data_does_not_claim_an_evaluation_history():
+    # Live Flagsmith feature payloads carry no evaluation counts and no
+    # last-evaluated timestamp. The scorer must not present the absence
+    # of that data as a measured "no evaluations in the last 30 days".
+    flags = [{
+        "name": "live_shaped_flag",
+        "created_date": iso(210),
+        "enabled": True,
+    }]
+    (entry,) = analyse_flags(flags, now=NOW)
+    assert entry["recommended_action"] == "archive"
+    assert any("no evaluation data recorded" in reason
+               for reason in entry["reasons"])
+    assert not any("no evaluations in the last" in reason
+                   for reason in entry["reasons"])
+
+
+def test_unverified_disabled_duration_is_a_caveat_not_an_instruction():
+    # The card may mark a flag safe to remove on the old-and-quiet
+    # signal while noting the disabled duration is unverified; the
+    # caveat must not read as an instruction to verify before archiving.
+    flags = [{
+        "name": "switched_off_unrecorded",
+        "created_at": iso(200),
+        "last_evaluated_at": iso(45),
+        "evaluations_last_30d": 0,
+        "enabled": False,
+    }]
+    (entry,) = analyse_flags(flags, now=NOW)
+    assert entry["safe_to_remove"] is True
+    assert any("how long it has been disabled is unverified" in reason
+               for reason in entry["reasons"])
+    assert not any("before archiving" in reason for reason in entry["reasons"])

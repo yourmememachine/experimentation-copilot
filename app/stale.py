@@ -24,6 +24,12 @@ Scoring is deterministic and capped at 100:
 - partial signals (old alone, or quiet alone) score lower, so a fresh,
   actively evaluated flag scores 0.
 
+When a flag carries no evaluation data at all — the live Flagsmith
+case, whose feature payloads have no evaluation counts or
+last-evaluated timestamps — quiet is inferred from age alone and the
+reason says "no evaluation data recorded" rather than claiming an
+evaluation history that was never measured.
+
 Standard library only.
 """
 
@@ -155,11 +161,19 @@ def _analyse_one(flag: dict, now: datetime) -> dict:
 
     if recent is not None:
         quiet = recent <= 0
+        quiet_basis = "count"
     elif last_evaluated is not None:
         quiet = days_since_evaluation is not None and days_since_evaluation > _QUIET_DAYS
+        quiet_basis = "last_evaluated"
     else:
-        # Never evaluated at all counts as quiet once the flag is not new.
+        # No evaluation data recorded at all. Quiet is inferred from the
+        # absence of data once the flag is not new, and the reasons below
+        # say so instead of claiming a measured evaluation history —
+        # live Flagsmith feature payloads carry no evaluation counts or
+        # last-evaluated timestamps, so this is the branch live mode
+        # always takes.
         quiet = age_days is not None and age_days > _QUIET_DAYS
+        quiet_basis = "no_data"
     old = age_days is not None and age_days > _OLD_DAYS
 
     reasons: list[str] = []
@@ -167,17 +181,26 @@ def _analyse_one(flag: dict, now: datetime) -> dict:
 
     if old and quiet:
         score += _SCORE_OLD_AND_QUIET
-        reasons.append(
-            f"Older than {_OLD_DAYS} days with no evaluations in the last "
-            f"{_QUIET_DAYS} days."
-        )
+        if quiet_basis == "no_data":
+            reasons.append(
+                f"Older than {_OLD_DAYS} days with no evaluation data "
+                f"recorded."
+            )
+        else:
+            reasons.append(
+                f"Older than {_OLD_DAYS} days with no evaluations in the last "
+                f"{_QUIET_DAYS} days."
+            )
     else:
         if old:
             score += _SCORE_PARTIAL
             reasons.append(f"Older than {_OLD_DAYS} days.")
         if quiet and age_days is not None and age_days > _QUIET_DAYS:
             score += _SCORE_PARTIAL
-            reasons.append(f"No evaluations in the last {_QUIET_DAYS} days.")
+            if quiet_basis == "no_data":
+                reasons.append("No evaluation data recorded.")
+            else:
+                reasons.append(f"No evaluations in the last {_QUIET_DAYS} days.")
 
     # Decided experiment: sitting at 100% rollout for over two weeks.
     # The full bonus requires an explicit since-field (full_rollout_since
@@ -207,8 +230,7 @@ def _analyse_one(flag: dict, now: datetime) -> dict:
             score += _SCORE_PARTIAL
             reasons.append(
                 "At 100% rollout, but no explicit full-rollout start was "
-                "recorded — verify how long it has been at 100% before "
-                "treating the experiment as decided."
+                "recorded, so how long it has been at 100% is unverified."
             )
 
     # Switched off and left off. As above, the full bonus requires an
@@ -232,8 +254,8 @@ def _analyse_one(flag: dict, now: datetime) -> dict:
                 score += _SCORE_PARTIAL
                 reasons.append(
                     "Disabled, but no explicit disabled-since date was "
-                    "recorded — verify how long it has been disabled "
-                    "before archiving."
+                    "recorded, so how long it has been disabled is "
+                    "unverified."
                 )
 
     score = min(score, 100)
