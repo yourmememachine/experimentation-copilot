@@ -37,11 +37,17 @@ Flagsmith is the core of the project, not a storage layer:
 | Flag | Type | Purpose |
 | --- | --- | --- |
 | `checkout_button_colour` | Multivariate (created live in the demo) | The experiment below |
-| `new_onboarding_flow` | Boolean | Seeded example flag |
-| `pricing_page_v2` | Boolean | Seeded example flag |
+| `new_checkout_flow` | Boolean | Seeded example flag |
+| `pricing_page_redesign` | Boolean | Seeded example flag |
+| `recommendations_v2` | Boolean | Seeded example flag |
+| `beta_dashboard_access` | Boolean | Seeded example flag |
 | `legacy_search_v1` | Boolean | Stale — recommended for archive |
 | `old_promo_banner` | Boolean | Stale — recommended for archive |
 | `holiday_sale_banner_2025` | Boolean | Stale — recommended for archive |
+
+The three stale flags are seeded fixtures: their creation dates were set
+210 days in the past, which is the "210 days" age the cleanup check and
+the Flagsmith dashboard show in the video.
 
 ### Experiment hypothesis
 
@@ -100,13 +106,15 @@ Demo mode needs no Flagsmith account and no credentials: the copilot runs agains
 
 The recorded demo flow, in order: describe the checkout experiment → review the plan → watch a 95%-traffic plan and a no-metric plan get stopped by the guardrails → approve and apply the 20% plan → see the flag live in the Flagsmith dashboard → simulate 2,000 visitors (winner: blue, p < 0.001) → simulate 60 visitors (Inconclusive) → roll the winner out to 100% and verify the weights in Flagsmith → run the stale check → archive a stale flag → roll the apply back from its snapshot.
 
+The self-hosted build used for the demo gates its Audit Log page behind an Enterprise plan banner, so the page itself cannot be shown. A sanitized extract from the underlying audit table is published at [docs/AUDIT-EXTRACT.md](docs/AUDIT-EXTRACT.md), and it keeps the two flags it covers separate: `pricing_page_banner`, from the live-API verification run (audit ids 26–36), and `checkout_button_colour`, the flag the demo video centres on (its own create, enable, graduate, archive-assist and rollback entries from the recorded session).
+
 ## Tests
 
 ```bash
 pytest tests/ -q
 ```
 
-69 tests: the guardrail rules, the staleness scoring, the planner's edge cases, the Flagsmith client's request shapes against the current API, the simulation's significance gate, and API-level safety tests proving that refused plans never mutate flag state, that rollback restores the pre-change state (including variant allocations), and that archiving only ever touches flags the stale check marks safe to remove.
+74 tests: the guardrail rules, the staleness scoring, the planner's edge cases, the Flagsmith client's request shapes against the current API, the simulation's significance gate, variant names rendering alongside their allocations in the flag list, the p-value rendering identically in the results and rollout views, and API-level safety tests proving that refused plans never mutate flag state, that rollback restores the pre-change state (including variant allocations), and that archiving only ever touches flags the stale check marks safe to remove.
 
 ## Disclosure
 

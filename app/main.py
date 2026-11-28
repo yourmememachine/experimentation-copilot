@@ -343,7 +343,18 @@ def h_health():
 
 def h_flags():
     flags, available = _list_flags_status()
-    payload = {"flags": flags, "demo_mode": is_demo_mode(), "client_available": available}
+    # Shape each multivariate flag with a canonical "variants" list
+    # (name + allocation). Live Flagsmith options name the variant in
+    # "string_value", which the UI's raw-option fallback cannot see —
+    # without this shaping the flags table renders bare percentages
+    # ("50%, 50%") instead of "green 50%, blue 50%".
+    shaped = []
+    for f in flags:
+        if isinstance(f, dict) and (f.get("multivariate_options") or f.get("variants")):
+            f = dict(f)
+            f["variants"] = _variants_of(f)
+        shaped.append(f)
+    payload = {"flags": shaped, "demo_mode": is_demo_mode(), "client_available": available}
     if not available:
         payload["error"] = "Flagsmith client unavailable — no flags could be loaded."
     return payload

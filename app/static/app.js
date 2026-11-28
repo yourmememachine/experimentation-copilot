@@ -34,7 +34,7 @@ function variantWeight(v) {
   const w = Number(v.weight ?? v.allocation_percent ?? v.default_percentage_allocation ?? v.allocation);
   return Number.isFinite(w) ? Math.min(100, Math.max(0, w)) : 0;
 }
-function variantName(v) { return v.name || v.value || "variant"; }
+function variantName(v) { return v.name || v.value || v.string_value || "variant"; }
 
 function splitBar(variants) {
   const colours = ["#2563eb", "#f59e0b", "#10b981", "#8b5cf6"];
@@ -134,7 +134,7 @@ async function loadFlags() {
     if (d.client_available === false) $("#flagsError").textContent = d.error || "Flagsmith is unavailable right now.";
     document.querySelector("#flagsTable tbody").innerHTML = d.flags.map(f => {
       const vars = (f.variants && f.variants.length) ? f.variants.map(v => escapeHtml(variantName(v)) + " " + variantWeight(v) + "%")
-        : (f.multivariate_options || []).map(v => escapeHtml(v.value) + " " + (Number.isFinite(Number(v.default_percentage_allocation)) ? Number(v.default_percentage_allocation) : 0) + "%");
+        : (f.multivariate_options || []).map(v => escapeHtml(variantName(v)) + " " + variantWeight(v) + "%");
       return `<tr><td><code>${escapeHtml(f.name)}</code></td><td>${f.enabled ? "Enabled" : "Disabled"}${f.is_archived ? " (archived)" : ""}</td><td>${escapeHtml(f.type || "boolean")}</td>
        <td>${vars.join(", ") || "—"}</td><td>${escapeHtml(f.description || "")}</td></tr>`; }).join("");
   } catch (e) { $("#flagsError").textContent = e.message; }
@@ -148,6 +148,16 @@ function fmtP(p) {
   return n < 0.001 ? "< 0.001" : n.toFixed(3);
 }
 
+// The one canonical rendering of a p-value, used by every verdict line:
+// "p < 0.001" below the display floor, "p = 0.032" otherwise. Never build
+// "p = " + fmtP(...) inline — that produced "p = < 0.001" in one take of
+// the results panel while another take rendered "p < 0.001".
+function pPhrase(p) {
+  const f = fmtP(p);
+  if (!f) return null;
+  return f.startsWith("<") ? `p ${f}` : `p = ${f}`;
+}
+
 function renderResults(d) {
   lastWinnerFlag = d.flag_name;
   lastWinner = (d.recommended_winner && d.recommended_winner !== "inconclusive") ? d.recommended_winner : null;
@@ -155,16 +165,14 @@ function renderResults(d) {
     `<tr><td><code>${escapeHtml(v.name)}</code></td><td>${escapeHtml(v.exposures)}</td><td>${escapeHtml(v.conversions)}</td><td>${escapeHtml(v.rate)}</td></tr>`).join("");
   let verdict;
   if (lastWinner) {
-    const p = fmtP(d.p_value);
-    const pPhrase = p ? (p.startsWith("<") ? `p ${p}` : `p = ${p}`) : null;
+    const phrase = pPhrase(d.p_value);
     verdict = `<p class="pass">Recommended winner: <strong>${escapeHtml(lastWinner)}</strong> (${escapeHtml(d.total_conversions)} conversions in total).` +
-      (pPhrase && d.compared_against
-        ? ` Two-proportion z-test vs <strong>${escapeHtml(d.compared_against)}</strong>: ${pPhrase} — significant at the 5% level.`
+      (phrase && d.compared_against
+        ? ` Two-proportion z-test vs <strong>${escapeHtml(d.compared_against)}</strong>: ${phrase} — significant at the 5% level.`
         : "") + `</p>`;
   } else if (d.verdict_reason === "not_significant" && fmtP(d.p_value)) {
-    const p = fmtP(d.p_value);
-    const pPhrase = p.startsWith("<") ? `p ${p}` : `p = ${p}`;
-    verdict = `<p class="warn">Result so far: inconclusive — <strong>${escapeHtml(d.leader || "the leader")}</strong> leads, but the gap vs <strong>${escapeHtml(d.compared_against || "the runner-up")}</strong> is not statistically significant (${pPhrase}, z-test). No winner is recommended yet.</p>`;
+    const phrase = pPhrase(d.p_value);
+    verdict = `<p class="warn">Result so far: inconclusive — <strong>${escapeHtml(d.leader || "the leader")}</strong> leads, but the gap vs <strong>${escapeHtml(d.compared_against || "the runner-up")}</strong> is not statistically significant (${phrase}, z-test). No winner is recommended yet.</p>`;
   } else {
     verdict = `<p class="warn">Result so far: inconclusive — fewer than 30 conversions in total, so no winner is recommended yet.</p>`;
   }
