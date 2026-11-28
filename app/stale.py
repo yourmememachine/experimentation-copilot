@@ -18,17 +18,32 @@ epoch seconds. Durations may instead be given directly with fields such as
 
 Scoring is deterministic and capped at 100:
 
-- older than 90 days with no evaluations in the last 30 days: +60
+- old and quiet together: +60
 - at 100% rollout for more than 14 days (the experiment is decided): +50
 - disabled for more than 30 days: +50
-- partial signals (old alone, or quiet alone) score lower, so a fresh,
-  actively evaluated flag scores 0.
+- partial signals (old alone, or quiet alone, or a duration that
+  cannot be verified from an explicit record) score +15 each, so a
+  fresh, actively evaluated flag scores 0.
 
-When a flag carries no evaluation data at all — the live Flagsmith
-case, whose feature payloads have no evaluation counts or
-last-evaluated timestamps — quiet is inferred from age alone and the
-reason says "no evaluation data recorded" rather than claiming an
-evaluation history that was never measured.
+"Quiet" is judged on whatever evaluation evidence the flag carries,
+and the reasons say which basis was used:
+
+- an evaluation count for the last 30 days, when present: quiet means
+  a count of zero, and the reason reads "no evaluations in the last
+  30 days";
+- a last-evaluated timestamp, when present: quiet means the last
+  evaluation was more than 30 days ago, with the same measured reason;
+- no evaluation data at all — the live Flagsmith case, whose feature
+  payloads have no evaluation counts or last-evaluated timestamps:
+  quiet is inferred from age alone once the flag is more than 30 days
+  old, and the reason says "no evaluation data recorded" rather than
+  claiming an evaluation history that was never measured.
+
+The two +50 duration bonuses likewise require an explicit record — a
+``full_rollout_since`` / ``disabled_since`` timestamp or a day count.
+Without one, a flag that merely looks long-decided or long-disabled
+from its last-edit or creation time scores the partial +15 instead,
+with a reason stating that the duration is unverified.
 
 Standard library only.
 """

@@ -21,7 +21,7 @@ I built this for Toggle Wars Track 02 (AI Agents and Feature Flags). I kept runn
    - Flag names must follow a clean snake_case convention.
 3. **Approve and apply.** With approval, the copilot creates the multivariate flag in Flagsmith through the Flagsmith API, starting from the first rollout step rather than switching on at full exposure. Flagsmith is what serves the variants and splits the traffic from that point on — the copilot decides *what should happen next* (create, ramp, roll back, clean up), and Flagsmith carries it out and reports back.
 4. **Results and winner rollout.** The results panel records exposures and conversions per variant (a built-in simulator can generate deterministic demo traffic), names the winning variant — or says "inconclusive" when there is not enough data — and, with a second approval, graduates the winner to 100% in Flagsmith, snapshotting the previous state first so that step can be rolled back too.
-5. **Stale-flag cleanup.** A cleanup view scores every flag for staleness — older than 90 days with no evaluations in 30 days, sitting at 100% rollout for over 14 days (the experiment is decided; roll the winner out in code), or disabled for over 30 days — and recommends archive, roll out the winner, or keep, with the reasons shown.
+5. **Stale-flag cleanup.** A cleanup view scores every flag for staleness — old and quiet together, sitting at 100% rollout for over 14 days (the experiment is decided; roll the winner out in code), or disabled for over 30 days — and recommends archive, roll out the winner, or keep, with the reasons shown. "Quiet" is judged on whatever evaluation evidence a flag carries: an evaluation count or a last-evaluated timestamp when one is available. Live Flagsmith payloads carry neither, so there quiet is inferred from age alone and the reason says "no evaluation data recorded" instead of claiming an evaluation history that was never measured; durations that no explicit record verifies are stated as unverified rather than asserted.
 
 ## How Flagsmith is used
 
@@ -30,7 +30,7 @@ Flagsmith is the core of the project, not a storage layer:
 - **Multivariate flags** hold the experiment variants and their allocations.
 - **Traffic splits** are set on the flag, so Flagsmith decides which version each user sees.
 - **The experiment lifecycle** — create, ramp through rollout stages, roll back from a snapshot, archive when stale — is driven through the Flagsmith API by the copilot's planner and guardrails.
-- **Flag evaluation data** (age, last evaluation, rollout state) feeds the staleness scoring that drives cleanup recommendations.
+- **Flag state data** (age, rollout state, enabled state) feeds the staleness scoring that drives cleanup recommendations. Where a flag carries evaluation data — a recent evaluation count or a last-evaluated timestamp — that feeds the scoring too; live Flagsmith feature payloads carry neither, and the scorer's reasons say so rather than assuming an evaluation history.
 
 ### Flags used in the demo
 
