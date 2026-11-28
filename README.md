@@ -4,7 +4,7 @@ Turn a plain-English request into a guarded Flagsmith experiment — and keep yo
 
 I built this for Toggle Wars Track 02 (AI Agents and Feature Flags). I kept running into the same two problems with feature flags: setting up a proper experiment takes a dozen careful steps in a dashboard, and old flags pile up until nobody knows what is safe to remove. Experimentation Copilot handles both ends of that lifecycle.
 
-**Demo video:** https://www.youtube.com/watch?v=pZv9P1Cdvz0
+**Demo video:** https://www.youtube.com/watch?v=2p-yWPd_9i4
 **Track:** 02 — AI Agents and Feature Flags
 
 ## What it does
