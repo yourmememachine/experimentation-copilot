@@ -17,7 +17,7 @@ I built this for Toggle Wars Track 02 (AI Agents and Feature Flags). I kept runn
    - Nothing is applied to production without my explicit approval in the UI.
    - Traffic above 50% warns; above 90% is blocked without approval.
    - An experiment cannot be created without a success metric and a hypothesis.
-   - The previous flag state is snapshotted first, so every apply can be rolled back in one click.
+   - The previous flag state is snapshotted first, so every apply can be rolled back in one click. Rolling back restores the snapshotted state; a flag the apply created is disabled and archived on rollback, so nothing it created stays servable.
    - Flag names must follow a clean snake_case convention.
 3. **Approve and apply.** With approval, the copilot creates the multivariate flag in Flagsmith through the Flagsmith API, starting from the first rollout step rather than switching on at full exposure. Flagsmith is what serves the variants and splits the traffic from that point on — the copilot decides *what should happen next* (create, ramp, roll back, clean up), and Flagsmith carries it out and reports back.
 4. **Results and winner rollout.** The results panel records exposures and conversions per variant (a built-in simulator can generate deterministic demo traffic), names the winning variant — or says "inconclusive" when there is not enough data — and, with a second approval, graduates the winner to 100% in Flagsmith, snapshotting the previous state first so that step can be rolled back too.
@@ -106,7 +106,7 @@ Demo mode needs no Flagsmith account and no credentials: the copilot runs agains
 
 The recorded demo flow, in order: describe the checkout experiment → review the plan → watch a 95%-traffic plan and a no-metric plan get stopped by the guardrails → approve and apply the 20% plan → see the flag live in the Flagsmith dashboard → simulate 2,000 visitors (winner: blue, p < 0.001) → simulate 60 visitors (Inconclusive) → roll the winner out to 100% and verify the weights in Flagsmith → run the stale check → archive a stale flag → roll the apply back from its snapshot.
 
-The self-hosted build used for the demo gates its Audit Log page behind an Enterprise plan banner, so the page itself cannot be shown. A sanitized extract from the underlying audit table is published at [docs/AUDIT-EXTRACT.md](docs/AUDIT-EXTRACT.md), and it keeps the two flags it covers separate: `pricing_page_banner`, from the live-API verification run (audit ids 26–36), and `checkout_button_colour`, the flag the demo video centres on (its own create, enable, graduate, archive-assist and rollback entries from the recorded session).
+The self-hosted build used for the demo gates its Audit Log page behind an Enterprise plan banner, so the page itself cannot be shown. An extract from the underlying audit table is published at [docs/AUDIT-EXTRACT.md](docs/AUDIT-EXTRACT.md). It is generated mechanically from the audit log and the history tables by `docs/generate_audit_extract.py` (raw export: [docs/audit-export.json](docs/audit-export.json)), and it keeps the runs it covers separate: `pricing_page_banner`, from the live-API verification run; `checkout_button_colour`, the flag the demo video centres on (its create, enable, graduate, archive-assist and rollback entries from the recorded session and the later capture passes); and the two rollback measurements — `signup_button_label`, which showed that an archive-only rollback left a created flag served enabled, and `hero_banner_colour`, the same lifecycle after the fix, where the created flag is disabled and archived on rollback and the SDK endpoint no longer serves it enabled.
 
 ## Tests
 
@@ -114,7 +114,7 @@ The self-hosted build used for the demo gates its Audit Log page behind an Enter
 pytest tests/ -q
 ```
 
-74 tests: the guardrail rules, the staleness scoring, the planner's edge cases, the Flagsmith client's request shapes against the current API, the simulation's significance gate, variant names rendering alongside their allocations in the flag list, the p-value rendering identically in the results and rollout views, and API-level safety tests proving that refused plans never mutate flag state, that rollback restores the pre-change state (including variant allocations), and that archiving only ever touches flags the stale check marks safe to remove.
+78 tests: the guardrail rules, the staleness scoring, the planner's edge cases, the Flagsmith client's request shapes against the current API, the simulation's significance gate, variant names rendering alongside their allocations in the flag list, the p-value rendering identically in the results and rollout views, and API-level safety tests proving that refused plans never mutate flag state, that rollback restores the pre-change state (including variant allocations), that a flag created by an apply is disabled and archived — in that order — when its apply is rolled back, and that archiving only ever touches flags the stale check marks safe to remove.
 
 ## Disclosure
 

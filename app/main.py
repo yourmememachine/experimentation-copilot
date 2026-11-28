@@ -494,9 +494,16 @@ def h_rollback(body):
         current = _find_flag(name)
         try:
             if before is None:
-                # The apply created this flag; rolling back archives it.
+                # The apply created this flag. Rolling back must leave
+                # nothing servable behind: archiving alone is not
+                # enough, because the SDK flags endpoint still returns
+                # archived features with their last enabled state (an
+                # archived flag that was on keeps being served, on).
+                # So disable the environment state first, then archive.
                 if current is not None:
-                    client.archive_flag(current.get("id", name))
+                    fid = current.get("id", name)
+                    client.set_flag_state(fid, False)
+                    client.archive_flag(fid)
             else:
                 fid = (current or before).get("id", name)
                 client.update_feature(fid, description=before.get("description", ""),
@@ -514,7 +521,8 @@ def h_rollback(body):
             return 502, {"error": f"Flagsmith rejected the rollback: {exc}"}
         after = _find_flag(name)
         if before is None:
-            verified = after is None or bool(after.get("is_archived"))
+            verified = after is None or (bool(after.get("is_archived"))
+                                         and not bool(after.get("enabled")))
         else:
             verified = (after is not None
                         and bool(after.get("enabled")) == bool(before.get("enabled"))
